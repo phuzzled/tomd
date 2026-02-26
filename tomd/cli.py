@@ -13,20 +13,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Callable
 
 import click
-from rich.console import Console, Group
+from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
 from rich.table import Table
 from rich.text import Text
 
@@ -37,7 +28,6 @@ from tomd.converter import (
     ConversionResult,
     check_pandoc,
     convert_file,
-    get_pdf_page_count,
     is_supported,
     pandoc_install_hint,
 )
@@ -128,138 +118,71 @@ def _print_banner() -> None:
     )
 
 
-def _build_layout(
-    results_table: Table | None,
-    file_text: Text,
-    file_progress: Progress,
-    page_text: Text,
-    status_text: Text,
-) -> Group:
-    """Assemble the live display layout."""
-    parts: list = []
-    if results_table is not None and results_table.row_count > 0:
-        parts.append(results_table)
-        parts.append(Text(""))  # spacer
-    parts.append(file_text)
-    parts.append(file_progress)
-    if page_text.plain:  # only show page line if it has content
-        parts.append(page_text)
-    parts.append(status_text)
-    return Group(*parts)
-
-
 def _convert_with_progress(
     targets: list[Path],
     out_path: Path | None,
     force: bool,
     cwd: Path,
 ) -> list[ConversionResult]:
-    """Convert files with a live progress display and results table."""
+    """Convert files with scrolling line-by-line output and per-file PDF progress."""
     results: list[ConversionResult] = []
     total = len(targets)
+    converted = skipped = failed = 0
 
-    # ── File-level progress bar ──
-    file_progress = Progress(
-        SpinnerColumn("dots", style="cyan"),
-        BarColumn(bar_width=40, style="dim", complete_style="cyan", finished_style="green"),
-        MofNCompleteColumn(),
-        TextColumn("│"),
-        TimeElapsedColumn(),
-        console=console,
-    )
-    file_task = file_progress.add_task("Files", total=total)
+    for i, target in enumerate(targets, 1):
+        try:
+            display_name = str(target.relative_to(cwd))
+        except ValueError:
+            display_name = target.name
+        short_name = _truncate(display_name, 50)
 
-    # ── Mutable display elements ──
-    file_text = Text()
-    page_text = Text()
-    status_text = Text()
-    results_table: Table | None = None
+        ext = target.suffix.lower()
+        is_pdf = ext in PDF_EXTENSIONS
+        prefix = f"  [dim][{i}/{total}][/dim]"
 
-    live_ref: Live | None = None  # capture for the page callback
+        if is_pdf:
+            # ── Per-file live progress for PDFs ──────────────────────
+            page_ref: list[tuple[int, int]] = [(0, 0)]
+            live_ref: list = [None]
 
-    def _on_page(current: int, total_pages: int) -> None:
-        """Callback invoked per PDF page — updates page_text in place."""
-        nonlocal page_text
-        pct = int(current / total_pages * 100) if total_pages else 0
-        filled = int(current / total_pages * 20) if total_pages else 0
-        bar = "█" * filled + "░" * (20 - filled)
-        page_text = Text.from_markup(
-            f"  [dim]Pages:[/dim]  {bar}  [bold]{current}[/bold][dim]/{total_pages}[/dim]  [dim]({pct}%)[/dim]"
-        )
-        if live_ref:
-            live_ref.update(
-                _build_layout(results_table, file_text, file_progress, page_text, status_text)
-            )
+            def _on_page(cur: int, tot: int) -> None:
+                page_ref[0] = (cur, tot)
+                if live_ref[0] is None:
+                    return
+                filled = int(cur / tot * 20) if tot else 0
+                bar = "█" * filled + "░" * (20 - filled)
+                live_ref[0].update(
+                    Text.from_markup(
+                        f"{prefix} [cyan]{short_name}[/cyan]  "
+                        f"[dim]page {cur}/{tot}[/dim]  {bar}"
+                    )
+                )
 
-    with Live(
-        _build_layout(results_table, file_text, file_progress, page_text, status_text),
-        console=console,
-        refresh_per_second=12,
-        transient=True,
-    ) as live:
-        live_ref = live
-        converted = skipped = failed = 0
+            with Live(
+                Text.from_markup(f"{prefix} [cyan]{short_name}[/cyan]  [dim]starting…[/dim]"),
+                console=console,
+                refresh_per_second=12,
+                transient=True,
+            ) as live:
+                live_ref[0] = live
+                result = convert_file(target, output_dir=out_path, force=force, on_page=_on_page)
+        else:
+            result = convert_file(target, output_dir=out_path, force=force, on_page=None)
 
-        for target in targets:
-            # ── Current file label ──
-            try:
-                display_name = str(target.relative_to(cwd))
-            except ValueError:
-                display_name = target.name
-            short_name = _truncate(display_name)
+        results.append(result)
 
-            ext = target.suffix.lower()
-            is_pdf = ext in PDF_EXTENSIONS
-
-            file_text = Text.from_markup(
-                f"  [dim]File:[/dim] [cyan]{short_name}[/cyan]"
-                + ("  [dim](PDF — page-by-page)[/dim]" if is_pdf else "")
-            )
-
-            # Reset page progress for this file
-            page_text = Text()
-
-            live.update(
-                _build_layout(results_table, file_text, file_progress, page_text, status_text)
-            )
-
-            # ── Convert ──
-            result = convert_file(
-                target,
-                output_dir=out_path,
-                force=force,
-                on_page=_on_page if is_pdf else None,
-            )
-            results.append(result)
-
-            # ── Update counters ──
-            if result.success:
-                converted += 1
-            elif result.skipped:
-                skipped += 1
-            else:
-                failed += 1
-
-            # ── Rebuild live results table ──
-            results_table = _build_live_table(results, cwd)
-
-            # ── Tally line ──
-            parts = []
-            if converted:
-                parts.append(f"[green]✓ {converted} converted[/green]")
-            if skipped:
-                parts.append(f"[yellow]⊘ {skipped} skipped[/yellow]")
-            if failed:
-                parts.append(f"[red]✗ {failed} failed[/red]")
-            status_text = Text.from_markup(f"  {'  │  '.join(parts)}")
-
-            # Clear page text now that this file is done
-            page_text = Text()
-
-            file_progress.advance(file_task)
-            live.update(
-                _build_layout(results_table, file_text, file_progress, page_text, status_text)
-            )
+        # ── Print permanent result line ───────────────────────────────
+        if result.success:
+            out_name = result.output.name if result.output else ""
+            console.print(f"{prefix} [green]✓[/green]  {short_name}  [dim]→ {out_name}[/dim]")
+            converted += 1
+        elif result.skipped:
+            console.print(f"{prefix} [yellow]⊘[/yellow]  {short_name}  [dim](exists — use --force)[/dim]")
+            skipped += 1
+        else:
+            err = (result.error or "Unknown error")[:80]
+            console.print(f"{prefix} [red]✗[/red]  {short_name}  [dim]{err}[/dim]")
+            failed += 1
 
     return results
 

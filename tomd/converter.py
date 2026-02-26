@@ -148,21 +148,24 @@ def convert_pdf(
 
 
 def convert_with_pandoc(source: Path) -> str:
-    """Convert a file to Markdown via pypandoc / Pandoc."""
-    import pypandoc  # type: ignore
-
+    """Convert a file to Markdown via Pandoc (direct subprocess call)."""
     ext = source.suffix.lower()
     input_format = PANDOC_FORMATS.get(ext)
 
-    extra_args = ["--wrap=none", "--standalone"]
+    cmd = [
+        "pandoc",
+        "--wrap=none",
+        "--standalone",
+        "--to=markdown",
+    ]
+    if input_format:
+        cmd.append(f"--from={input_format}")
+    cmd.append(str(source))
 
-    output: str = pypandoc.convert_file(
-        str(source),
-        to="markdown",
-        format=input_format,
-        extra_args=extra_args,
-    )
-    return output
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    if result.returncode != 0:
+        raise RuntimeError(f"pandoc failed: {result.stderr.strip()}")
+    return result.stdout
 
 
 def convert_mobi(source: Path) -> str:
