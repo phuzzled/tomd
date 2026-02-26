@@ -127,6 +127,7 @@ def convert_pdf(
         called after each page is processed.
     """
     import pymupdf  # type: ignore
+    import pymupdf.layout  # type: ignore  # activates GNN layout engine for pymupdf4llm
     import pymupdf4llm  # type: ignore
 
     doc = pymupdf.open(str(source))
