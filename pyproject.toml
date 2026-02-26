@@ -7,7 +7,7 @@ name = "tomd"
 version = "1.0.0"
 description = "Convert any document to Markdown from the command line"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.9"
 dependencies = [
     "click>=8.0",
@@ -21,3 +21,6 @@ tomd = "tomd.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["tomd*"]

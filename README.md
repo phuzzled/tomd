@@ -1,100 +1,173 @@
-# TOMD — Universal Document → Markdown Converter
+<div align="center">
 
-A cross-platform CLI tool that converts document files to Markdown. Navigate to any folder, type `tomd`, and every supported file gets converted.
+# TOMD
 
-## Supported Formats
+### *Any document. Pure Markdown. One command.*
 
-| Format | Engine |
-|---|---|
-| **PDF** | [PyMuPDF4LLM](https://github.com/pymupdf/RAG) |
-| **DOCX, EPUB, ODT, RTF, HTML, LaTeX, RST, Textile, MediaWiki, DocBook, FB2, OPML, Org, PPTX** | [Pandoc](https://pandoc.org) |
-| **MOBI, AZW, AZW3** | [Calibre](https://calibre-ebook.com) → Pandoc |
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue?style=flat-square&logo=python)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+[![Powered by Pandoc](https://img.shields.io/badge/Powered%20by-Pandoc-orange?style=flat-square)](https://pandoc.org)
+[![PDF via PyMuPDF](https://img.shields.io/badge/PDF%20via-PyMuPDF4LLM-red?style=flat-square)](https://github.com/pymupdf/RAG)
 
-## Installation
+</div>
 
-### Prerequisites
+---
 
-**Pandoc** is required for most formats (everything except PDF):
+You have a folder full of PDFs, EPUBs, DOCXs, and ancient RTFs.  
+You need clean, readable Markdown.  
+You don't want to think about it.
+
+**That's TOMD.**
+
+Drop it in a directory. Run `tomd`. Done.
+
+---
+
+## ✨ What It Does
+
+TOMD is a blazing-fast, terminal-native document converter that turns virtually any document format into clean, LLM-ready Markdown — with a gorgeous live progress display, per-file status tracking, and page-by-page PDF progress reporting.
+
+No GUIs. No configuration files. No nonsense.
+
+---
+
+## 📦 Supported Formats
+
+| Format      | Extensions                          | Engine             |
+|-------------|-------------------------------------|--------------------|
+| **PDF**     | `.pdf`                              | PyMuPDF4LLM        |
+| **Word**    | `.docx`                             | Pandoc             |
+| **eBook**   | `.epub`                             | Pandoc             |
+| **Kindle**  | `.mobi`, `.azw`, `.azw3`            | Calibre + Pandoc   |
+| **Web**     | `.html`, `.htm`, `.xhtml`           | Pandoc             |
+| **Slides**  | `.pptx`                             | Pandoc             |
+| **Docs**    | `.odt`, `.rtf`, `.docbook`, `.fb2`  | Pandoc             |
+| **Code**    | `.rst`, `.tex`, `.org`, `.ipynb`    | Pandoc             |
+| **Data**    | `.csv`, `.tsv`, `.json`             | Pandoc             |
+| **Wiki**    | `.mediawiki`, `.wiki`, `.opml`      | Pandoc             |
+
+---
+
+## 🚀 Installation
+
+**The recommended way** — install globally with [`pipx`](https://pipx.pypa.io/) so it's available everywhere on your system:
 
 ```bash
-# macOS
-brew install pandoc
+# Install pipx if you don't have it
+brew install pipx && pipx ensurepath
 
-# Ubuntu / Debian
-sudo apt install pandoc
+# Clone the repo
+git clone https://github.com/phuzzled/tomd.git
+cd tomd
 
-# Windows
-choco install pandoc    # or scoop install pandoc
+# Install globally (editable — code changes take effect immediately)
+pipx install -e .
 ```
 
-**Calibre** is optional — only needed if you convert MOBI/AZW files:
+You can now run `tomd` from any directory on your machine.
 
-```bash
-# macOS
-brew install --cask calibre
+> **Prerequisites:** Install [Pandoc](https://pandoc.org/installing.html) for most formats. For Kindle files, install [Calibre](https://calibre-ebook.com/download).
+> ```bash
+> brew install pandoc
+> brew install --cask calibre
+> ```
 
-# Ubuntu / Debian
-sudo apt install calibre
+---
 
-# Windows
-choco install calibre
-```
-
-### Install TOMD
-
-```bash
-# Clone or download this repo, then:
-cd TOMD
-pip install .
-
-# Or for development (editable install):
-pip install -e .
-```
-
-## Usage
+## 🎯 Usage
 
 ```bash
 # Convert all supported files in the current directory
 tomd
 
-# Overwrite existing .md files
-tomd --force
+# Convert specific files
+tomd report.pdf brief.docx chapter.epub
 
 # Recurse into subdirectories
 tomd -r
 
-# Convert specific files
-tomd report.pdf slides.pptx notes.docx
+# Force overwrite of existing .md files
+tomd --force
 
-# Output .md files to a specific directory
-tomd --output-dir ./markdown
+# Write output to a specific directory
+tomd --output-dir ./converted
 
 # Combine options
-tomd -r -f -o ./converted
+tomd -r --force --output-dir ./markdown
 
-# Quiet mode (no banner)
-tomd -q
+# Show version
+tomd -v
 ```
 
-### Options
+All converted files land in a `md-done/` folder (or wherever you point `--output-dir`), leaving your originals exactly where they are.
 
-| Flag | Short | Description |
-|---|---|---|
-| `--force` | `-f` | Overwrite existing `.md` output files |
-| `--recursive` | `-r` | Recurse into subdirectories |
-| `--output-dir DIR` | `-o DIR` | Write `.md` files to a specific directory |
-| `--quiet` | `-q` | Suppress banner, show only results |
-| `--version` | `-v` | Show version |
-| `--help` | `-h` | Show help |
+---
 
-## How It Works
+## 🖥️ What You'll See
 
-1. **PDF** files are processed with `pymupdf4llm`, which extracts text while preserving headings, lists, and tables as Markdown.
-2. **MOBI/AZW** files are first converted to EPUB via Calibre's `ebook-convert`, then the EPUB is converted to Markdown via Pandoc.
-3. **All other formats** are converted directly by Pandoc.
+TOMD uses a sleek, live-updating terminal display powered by **Rich**:
 
-Output files are named `<original_name>.md` and placed alongside the source file (or in `--output-dir` if specified).
+- **Live results table** — every file ticks ✓ green, ⊘ yellow (skipped), or ✗ red (failed) as it completes
+- **File progress bar** — tracks how many files have been processed
+- **PDF page bar** — for large PDFs, a `█░░░░░░░░░` bar shows page-by-page progress so you're never left wondering
+- **Final summary** — a clean table of every result when the run is complete
 
-## License
+No blinking cursors. No silent freezes. Just pure, observable progress.
 
-MIT
+---
+
+## 🤖 Built for LLMs
+
+TOMD's PDF engine is powered by **PyMuPDF4LLM**, specifically designed to produce structured, clean Markdown that preserves:
+
+- Headings, bold, italic, tables  
+- Reading order across multi-column layouts  
+- Inline code and technical notation
+
+Feed the output directly into your RAG pipelines, vector databases, or AI workflows. TOMD gets the docs in; your model does the rest.
+
+---
+
+## ⚙️ Options Reference
+
+| Option              | Short | Description                                             |
+|---------------------|-------|---------------------------------------------------------|
+| `--force`           | `-f`  | Overwrite existing `.md` output files                   |
+| `--recursive`       | `-r`  | Recurse into subdirectories                             |
+| `--output-dir DIR`  | `-o`  | Write `.md` files to a specific directory               |
+| `--quiet`           | `-q`  | Suppress the banner; show only results                  |
+| `--version`         | `-v`  | Print current version and exit                          |
+| `--help`            | `-h`  | Show help and exit                                      |
+
+---
+
+## 🛠️ Development
+
+```bash
+git clone https://github.com/phuzzled/tomd.git
+cd tomd
+
+# Install in editable mode (changes to the source reflect immediately)
+pipx install -e .
+
+# Or use a virtual environment
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+```
+
+---
+
+## 📄 License
+
+MIT — free to use, modify, and distribute.
+
+---
+
+<div align="center">
+
+**Stop copy-pasting. Start converting.**
+
+</div>
