@@ -2,7 +2,7 @@
 Conversion engine for TOMD.
 
 Routes each file to the appropriate converter based on extension:
-- PDF  → Marker (marker-pdf) for high-quality, reliable markdown extraction
+- PDF  → pymupdf4llm (fast, reliable markdown extraction)
 - MOBI → Calibre ebook-convert → temp EPUB → Pandoc
 - Everything else (docx, epub, odt, rtf, html, etc.) → Pandoc
 """
@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import multiprocessing as mp
 import tempfile
 from pathlib import Path
 
@@ -105,57 +104,18 @@ def calibre_install_hint() -> str:
 
 # ── Converters ───────────────────────────────────────────────────────────────
 
-def _marker_worker(source_str: str, output_path: str) -> None:
-    """Isolated subprocess: loads Marker models, converts one PDF, writes markdown to disk.
-
-    Running this in a spawned child process means the OS fully reclaims the
-    ~10-15 GB of model weights as soon as the process exits — before the next
-    file is started.
-    """
-    from marker.converters.pdf import PdfConverter  # type: ignore
-    from marker.models import create_model_dict  # type: ignore
-    from marker.config.parser import ConfigParser  # type: ignore
-
-    config = {
-        "output_format": "markdown",
-        "disable_image_extraction": True,
-    }
-    config_parser = ConfigParser(config)
-    converter = PdfConverter(
-        config=config_parser.generate_config_dict(),
-        artifact_dict=create_model_dict(),
-    )
-    rendered = converter(source_str)
-    Path(output_path).write_text(rendered.markdown, encoding="utf-8")
-
-
 def convert_pdf(source: Path) -> str:
-    """Convert a PDF file to Markdown using Marker.
+    """Convert a PDF file to Markdown via pymupdf4llm.
 
-    Each conversion runs in its own spawned subprocess so that the large ML
-    model weights (~10-15 GB) are fully unloaded from memory between files.
-    Without this isolation, processing a batch of PDFs exhausts system RAM.
+    pymupdf4llm is fast and lightweight. The GNN layout engine (pymupdf-layout)
+    is intentionally NOT imported here — it was the cause of silent hangs on
+    certain PDFs. Without it, layout detection falls back to pymupdf's
+    built-in heuristics, which are reliable and work well for the vast
+    majority of documents.
     """
-    with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as tmp:
-        tmp_path = tmp.name
+    import pymupdf4llm  # type: ignore
 
-    try:
-        # spawn = fresh interpreter (no memory inherited from parent)
-        ctx = mp.get_context("spawn")
-        proc = ctx.Process(target=_marker_worker, args=(str(source), tmp_path))
-        proc.start()
-        proc.join()
-
-        if proc.exitcode != 0:
-            raise RuntimeError(
-                f"Marker worker exited with code {proc.exitcode} "
-                f"while converting {source.name}"
-            )
-
-        return Path(tmp_path).read_text(encoding="utf-8")
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
-
+    return pymupdf4llm.to_markdown(str(source))
 
 
 def convert_with_pandoc(source: Path) -> str:
