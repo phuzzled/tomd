@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import multiprocessing as mp
 import tempfile
 from pathlib import Path
 
@@ -104,15 +105,12 @@ def calibre_install_hint() -> str:
 
 # ── Converters ───────────────────────────────────────────────────────────────
 
-def convert_pdf(source: Path) -> str:
-    """Convert a PDF file to Markdown using Marker.
+def _marker_worker(source_str: str, output_path: str) -> None:
+    """Isolated subprocess: loads Marker models, converts one PDF, writes markdown to disk.
 
-    Marker is a high-quality, ML-backed PDF converter that handles complex
-    layouts, tables, multi-column text, equations, and scanned documents far
-    more reliably than rule-based alternatives.
-
-    Note: On first use, Marker will download its model weights (~1–2 GB).
-    Subsequent calls load from the local cache and are much faster.
+    Running this in a spawned child process means the OS fully reclaims the
+    ~10-15 GB of model weights as soon as the process exits — before the next
+    file is started.
     """
     from marker.converters.pdf import PdfConverter  # type: ignore
     from marker.models import create_model_dict  # type: ignore
@@ -120,8 +118,6 @@ def convert_pdf(source: Path) -> str:
 
     config = {
         "output_format": "markdown",
-        # Prevent Marker from writing extracted images to disk; TOMD only
-        # needs the markdown text.
         "disable_image_extraction": True,
     }
     config_parser = ConfigParser(config)
@@ -129,8 +125,37 @@ def convert_pdf(source: Path) -> str:
         config=config_parser.generate_config_dict(),
         artifact_dict=create_model_dict(),
     )
-    rendered = converter(str(source))
-    return rendered.markdown
+    rendered = converter(source_str)
+    Path(output_path).write_text(rendered.markdown, encoding="utf-8")
+
+
+def convert_pdf(source: Path) -> str:
+    """Convert a PDF file to Markdown using Marker.
+
+    Each conversion runs in its own spawned subprocess so that the large ML
+    model weights (~10-15 GB) are fully unloaded from memory between files.
+    Without this isolation, processing a batch of PDFs exhausts system RAM.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        # spawn = fresh interpreter (no memory inherited from parent)
+        ctx = mp.get_context("spawn")
+        proc = ctx.Process(target=_marker_worker, args=(str(source), tmp_path))
+        proc.start()
+        proc.join()
+
+        if proc.exitcode != 0:
+            raise RuntimeError(
+                f"Marker worker exited with code {proc.exitcode} "
+                f"while converting {source.name}"
+            )
+
+        return Path(tmp_path).read_text(encoding="utf-8")
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
 
 
 def convert_with_pandoc(source: Path) -> str:
