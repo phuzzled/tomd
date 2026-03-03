@@ -2,7 +2,7 @@
 Conversion engine for TOMD.
 
 Routes each file to the appropriate converter based on extension:
-- PDF  → pymupdf4llm (high-quality markdown extraction)
+- PDF  → Marker (marker-pdf) for high-quality, reliable markdown extraction
 - MOBI → Calibre ebook-convert → temp EPUB → Pandoc
 - Everything else (docx, epub, odt, rtf, html, etc.) → Pandoc
 """
@@ -104,48 +104,33 @@ def calibre_install_hint() -> str:
 
 # ── Converters ───────────────────────────────────────────────────────────────
 
-def get_pdf_page_count(source: Path) -> int:
-    """Return the number of pages in a PDF without converting it."""
-    import pymupdf  # type: ignore
+def convert_pdf(source: Path) -> str:
+    """Convert a PDF file to Markdown using Marker.
 
-    doc = pymupdf.open(str(source))
-    count = len(doc)
-    doc.close()
-    return count
+    Marker is a high-quality, ML-backed PDF converter that handles complex
+    layouts, tables, multi-column text, equations, and scanned documents far
+    more reliably than rule-based alternatives.
 
-
-def convert_pdf(
-    source: Path,
-    on_page: callable | None = None,
-) -> str:
-    """Convert a PDF file to Markdown via pymupdf4llm, page by page.
-
-    Parameters
-    ----------
-    on_page : callable | None
-        Optional callback ``(current_page, total_pages) -> None``
-        called after each page is processed.
+    Note: On first use, Marker will download its model weights (~1–2 GB).
+    Subsequent calls load from the local cache and are much faster.
     """
-    import pymupdf  # type: ignore
-    import pymupdf.layout  # type: ignore  # activates GNN layout engine for pymupdf4llm
-    import pymupdf4llm  # type: ignore
+    from marker.converters.pdf import PdfConverter  # type: ignore
+    from marker.models import create_model_dict  # type: ignore
+    from marker.config.parser import ConfigParser  # type: ignore
 
-    doc = pymupdf.open(str(source))
-    total_pages = len(doc)
-    doc.close()
-
-    if on_page is None:
-        # Fast path — convert everything at once
-        return pymupdf4llm.to_markdown(str(source))
-
-    # Page-by-page for progress reporting
-    chunks: list[str] = []
-    for page_num in range(total_pages):
-        chunk: str = pymupdf4llm.to_markdown(str(source), pages=[page_num])
-        chunks.append(chunk)
-        on_page(page_num + 1, total_pages)
-
-    return "\n".join(chunks)
+    config = {
+        "output_format": "markdown",
+        # Prevent Marker from writing extracted images to disk; TOMD only
+        # needs the markdown text.
+        "disable_image_extraction": True,
+    }
+    config_parser = ConfigParser(config)
+    converter = PdfConverter(
+        config=config_parser.generate_config_dict(),
+        artifact_dict=create_model_dict(),
+    )
+    rendered = converter(str(source))
+    return rendered.markdown
 
 
 def convert_with_pandoc(source: Path) -> str:
@@ -223,7 +208,6 @@ def convert_file(
     source: Path,
     output_dir: Path | None = None,
     force: bool = False,
-    on_page: callable | None = None,
 ) -> ConversionResult:
     """
     Convert a single file to Markdown.
@@ -236,8 +220,6 @@ def convert_file(
         Directory for the output `.md` file (defaults to same dir as source).
     force : bool
         If True, overwrite existing `.md` files.
-    on_page : callable | None
-        Progress callback ``(current_page, total_pages)`` for PDF files.
 
     Returns
     -------
@@ -255,7 +237,7 @@ def convert_file(
 
     try:
         if ext in PDF_EXTENSIONS:
-            md_text = convert_pdf(source, on_page=on_page)
+            md_text = convert_pdf(source)
         elif ext in MOBI_EXTENSIONS:
             if not check_calibre():
                 return ConversionResult(
@@ -289,4 +271,3 @@ def convert_file(
 
     except Exception as exc:
         return ConversionResult(source, error=str(exc))
-

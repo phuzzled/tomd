@@ -24,7 +24,6 @@ from rich.text import Text
 from tomd import __version__
 from tomd.converter import (
     ALL_SUPPORTED,
-    PDF_EXTENSIONS,
     ConversionResult,
     check_pandoc,
     convert_file,
@@ -124,7 +123,7 @@ def _convert_with_progress(
     force: bool,
     cwd: Path,
 ) -> list[ConversionResult]:
-    """Convert files with scrolling line-by-line output and per-file PDF progress."""
+    """Convert files with scrolling line-by-line output and a per-file spinner."""
     results: list[ConversionResult] = []
     total = len(targets)
     converted = skipped = failed = 0
@@ -135,39 +134,15 @@ def _convert_with_progress(
         except ValueError:
             display_name = target.name
         short_name = _truncate(display_name, 50)
-
-        ext = target.suffix.lower()
-        is_pdf = ext in PDF_EXTENSIONS
         prefix = f"  [dim][{i}/{total}][/dim]"
 
-        if is_pdf:
-            # ── Per-file live progress for PDFs ──────────────────────
-            page_ref: list[tuple[int, int]] = [(0, 0)]
-            live_ref: list = [None]
-
-            def _on_page(cur: int, tot: int) -> None:
-                page_ref[0] = (cur, tot)
-                if live_ref[0] is None:
-                    return
-                filled = int(cur / tot * 20) if tot else 0
-                bar = "█" * filled + "░" * (20 - filled)
-                live_ref[0].update(
-                    Text.from_markup(
-                        f"{prefix} [cyan]{short_name}[/cyan]  "
-                        f"[dim]page {cur}/{tot}[/dim]  {bar}"
-                    )
-                )
-
-            with Live(
-                Text.from_markup(f"{prefix} [cyan]{short_name}[/cyan]  [dim]starting…[/dim]"),
-                console=console,
-                refresh_per_second=12,
-                transient=True,
-            ) as live:
-                live_ref[0] = live
-                result = convert_file(target, output_dir=out_path, force=force, on_page=_on_page)
-        else:
-            result = convert_file(target, output_dir=out_path, force=force, on_page=None)
+        with Live(
+            Text.from_markup(f"{prefix} [cyan]{short_name}[/cyan]  [dim]converting…[/dim]"),
+            console=console,
+            refresh_per_second=12,
+            transient=True,
+        ):
+            result = convert_file(target, output_dir=out_path, force=force)
 
         results.append(result)
 
